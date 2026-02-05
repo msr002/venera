@@ -691,6 +691,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   bool isZoomedIn = false;
   bool isLongPressing = false;
+  double _contentScale = 1.0;
 
   @override
   void initState() {
@@ -814,10 +815,26 @@ class _ContinuousModeState extends State<_ContinuousMode>
       context.readerScaffold.setFloatingButton(0);
     }
     final currentScale = scale ?? photoViewController.scale ?? 1.0;
-    var isZoomedIn = currentScale > 1.0;
-    if (isZoomedIn != this.isZoomedIn) {
+    final minScale = App.isAndroid ? 0.7 : 1.0;
+    final maxScale = 2.5;
+    final clampedScale = currentScale.clamp(minScale, maxScale);
+    final nextContentScale = clampedScale < 1.0 ? clampedScale : 1.0;
+    bool needSetState = false;
+    double? nextScaleToApply;
+    if ((nextContentScale - _contentScale).abs() > 0.01) {
+      nextScaleToApply = nextContentScale;
+      needSetState = true;
+    }
+    var nextIsZoomedIn = clampedScale > 1.0;
+    if (nextIsZoomedIn != this.isZoomedIn) {
+      needSetState = true;
+    }
+    if (needSetState) {
       setState(() {
-        this.isZoomedIn = isZoomedIn;
+        if (nextScaleToApply != null) {
+          _contentScale = nextScaleToApply;
+        }
+        this.isZoomedIn = nextIsZoomedIn;
       });
     }
     return false;
@@ -1021,6 +1038,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
     }
 
     final minScale = App.isAndroid ? 0.7 : 1.0;
+    final effectiveScale = _contentScale;
+    if (effectiveScale < 1.0) {
+      width = width / effectiveScale;
+      height = height / effectiveScale;
+    }
 
     return PhotoView.customChild(
       backgroundDecoration: BoxDecoration(color: context.colorScheme.surface),

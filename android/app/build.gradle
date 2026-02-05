@@ -92,7 +92,7 @@ android {
             dimension "app"
             applicationIdSuffix ".fork"
             versionNameSuffix "-fork"
-            resValue "string", "app_name", "venera Fork"
+            resValue "string", "app_name", "AManHua"
         }
     }
 
