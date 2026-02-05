@@ -1,0 +1,42 @@
+name: Build Android (Flavors)
+run-name: Build Android (official/fork)
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build_android:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: rm -rf /opt/hostedtoolcache
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version-file: pubspec.yaml
+          architecture: x64
+      - name: Decode and install certificate
+        env:
+          STORE_FILE: ${{ secrets.ANDROID_KEYSTORE }}
+          PROPERTY_FILE: ${{ secrets.ANDROID_KEY_PROPERTIES }}
+        run: |
+            echo "$STORE_FILE" | base64 --decode > android/keystore.jks
+            echo "$PROPERTY_FILE" > android/key.properties
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'oracle'
+          java-version: '17'
+      - name: Check rust-toolchain.toml
+        run: rustup show
+      - run: flutter pub get
+      - name: Build Android APKs (official/fork)
+        run: |
+          flutter build apk --flavor official --release
+          flutter build apk --flavor fork --release
+      - name: Collect APKs
+        run: |
+          mkdir -p result/apk
+          find build/app/outputs -name "*.apk" -exec cp {} result/apk/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: result/apk/*.apk
