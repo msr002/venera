@@ -813,7 +813,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
       });
       context.readerScaffold.setFloatingButton(0);
     }
-    var isZoomedIn = (scale ?? photoViewController.scale) != 1.0;
+    final currentScale = scale ?? photoViewController.scale ?? 1.0;
+    var isZoomedIn = currentScale > 1.0;
     if (isZoomedIn != this.isZoomedIn) {
       setState(() {
         this.isZoomedIn = isZoomedIn;
@@ -933,7 +934,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
       },
       onPointerMove: (event) {
         Offset value = event.delta;
-        if (photoViewController.scale == 1 || fingers != 1) {
+        final currentScale = photoViewController.scale ?? 1.0;
+        if (currentScale <= 1.0 || fingers != 1) {
           return;
         }
         Offset offset;
@@ -969,8 +971,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
         var scale = photoViewController.scale ?? 1.0;
 
-        if (notification is ScrollUpdateNotification &&
-            (scale - 1).abs() < 0.05) {
+        if (notification is ScrollUpdateNotification && scale <= 1.05) {
           if (!scrollController.hasClients) return false;
           if (scrollController.position.pixels <=
                   scrollController.position.minScrollExtent &&
@@ -1019,10 +1020,12 @@ class _ContinuousModeState extends State<_ContinuousMode>
       width = height * 0.7;
     }
 
+    final minScale = App.isAndroid ? 0.7 : 1.0;
+
     return PhotoView.customChild(
       backgroundDecoration: BoxDecoration(color: context.colorScheme.surface),
       childSize: Size(width, height),
-      minScale: 1.0,
+      minScale: minScale,
       maxScale: 2.5,
       strictScale: true,
       controller: photoViewController,
