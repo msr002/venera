@@ -815,9 +815,20 @@ class _ContinuousModeState extends State<_ContinuousMode>
       context.readerScaffold.setFloatingButton(0);
     }
     final currentScale = scale ?? photoViewController.scale ?? 1.0;
-    final minScale = App.isAndroid ? 0.7 : 1.0;
+    final configuredMinScale =
+        (appdata.settings.getReaderSetting(
+                  reader.cid,
+                  reader.type.sourceKey,
+                  "continuousMinScale",
+                )
+                as num?)
+            ?.toDouble() ??
+        0.7;
+    final minScale = App.isAndroid
+        ? configuredMinScale.clamp(0.5, 1.0).toDouble()
+        : 1.0;
     final maxScale = 2.5;
-    final clampedScale = currentScale.clamp(minScale, maxScale);
+    final clampedScale = currentScale.clamp(minScale, maxScale).toDouble();
     final nextContentScale = clampedScale < 1.0 ? clampedScale : 1.0;
     bool needSetState = false;
     double? nextScaleToApply;
@@ -1037,7 +1048,18 @@ class _ContinuousModeState extends State<_ContinuousMode>
       width = height * 0.7;
     }
 
-    final minScale = App.isAndroid ? 0.7 : 1.0;
+    final configuredMinScale =
+        (appdata.settings.getReaderSetting(
+                  reader.cid,
+                  reader.type.sourceKey,
+                  "continuousMinScale",
+                )
+                as num?)
+            ?.toDouble() ??
+        0.7;
+    final minScale = App.isAndroid
+        ? configuredMinScale.clamp(0.5, 1.0).toDouble()
+        : 1.0;
     final effectiveScale = _contentScale;
     if (effectiveScale < 1.0) {
       if (reader.mode == ReaderMode.continuousTopToBottom) {

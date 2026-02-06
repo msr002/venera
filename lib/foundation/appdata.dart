@@ -224,6 +224,7 @@ class Settings with ChangeNotifier {
     'comicSpecificSettings': <String, Map<String, dynamic>>{},
     'ignoreBadCertificate': false,
     'readerScrollSpeed': 1.0, // 0.5 - 3.0
+    'continuousMinScale': 0.7, // 0.5 - 1.0
     'localFavoritesFirst': true,
     'autoCloseFavoritePanel': false,
     'showChapterComments': true, // show chapter comments in reader

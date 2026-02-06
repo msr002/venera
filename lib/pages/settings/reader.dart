@@ -258,6 +258,23 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
           ),
         ),
+        SliverAnimatedVisibility(
+          visible:
+              App.isAndroid &&
+              appdata.settings['readerMode']!.startsWith('continuous'),
+          child: _SliderSetting(
+            title: "Minimum zoom scale".tl,
+            settingsIndex: "continuousMinScale",
+            interval: 0.05,
+            min: 0.5,
+            max: 1,
+            onChanged: () {
+              widget.onChanged?.call("continuousMinScale");
+            },
+            comicId: isEnabledSpecificSettings ? widget.comicId : null,
+            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+          ),
+        ),
         _SwitchSetting(
           title: 'Double tap to zoom'.tl,
           settingKey: 'enableDoubleTapToZoom',
