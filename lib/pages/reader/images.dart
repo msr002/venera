@@ -289,10 +289,10 @@ class _GalleryModeState extends State<_GalleryMode>
         fingers++;
       },
       onPointerUp: (event) {
-        fingers--;
+        fingers = math.max(0, fingers - 1);
       },
       onPointerCancel: (event) {
-        fingers--;
+        fingers = math.max(0, fingers - 1);
       },
       onPointerMove: (event) {
         if (isLongPressing) {
@@ -652,11 +652,17 @@ class _ContinuousMode extends StatefulWidget {
 
 class _ContinuousModeState extends State<_ContinuousMode>
     implements _ImageViewController {
+  static const double _kScaleBaseline = 1.0;
+  static const double _kScaleEpsilon = 0.01;
+  static const double _kScaleSyncEpsilon = 0.001;
+  static const double _kChangeChapterMaxScale = 1.05;
+
   late _ReaderState reader;
 
   var itemScrollController = ItemScrollController();
   var itemPositionsListener = ItemPositionsListener.create();
   var photoViewController = PhotoViewController();
+  StreamSubscription<PhotoViewControllerValue>? _photoViewSubscription;
   ScrollController? _scrollController;
 
   ScrollController get scrollController => _scrollController!;
@@ -692,24 +698,91 @@ class _ContinuousModeState extends State<_ContinuousMode>
   bool isZoomedIn = false;
   bool isLongPressing = false;
   double _contentScale = 1.0;
+  double _currentScale = _kScaleBaseline;
+
+  double get _configuredMinScale {
+    return (appdata.settings.getReaderSetting(
+              reader.cid,
+              reader.type.sourceKey,
+              "continuousMinScale",
+            )
+            as num?)
+        ?.toDouble() ??
+        0.7;
+  }
+
+  double get _minScale {
+    return App.isAndroid
+        ? _configuredMinScale.clamp(0.5, _kScaleBaseline).toDouble()
+        : _kScaleBaseline;
+  }
+
+  double get _maxScale => 2.5;
+
+  void _syncScaleState(PhotoViewControllerValue value) {
+    final nextScale =
+        (value.scale ?? _kScaleBaseline).clamp(_minScale, _maxScale).toDouble();
+    _currentScale = nextScale;
+    final nextContentScale = nextScale < _kScaleBaseline
+        ? nextScale
+        : _kScaleBaseline;
+    final nextIsZoomedIn = nextScale > _kScaleBaseline + _kScaleEpsilon;
+
+    if (nextScale <= _kScaleBaseline + _kScaleEpsilon &&
+        value.position.distanceSquared > 0.5) {
+      photoViewController.updateMultiple(position: Offset.zero);
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    final needSetState =
+        (nextContentScale - _contentScale).abs() > _kScaleSyncEpsilon ||
+        nextIsZoomedIn != isZoomedIn;
+    if (needSetState) {
+      setState(() {
+        _contentScale = nextContentScale;
+        isZoomedIn = nextIsZoomedIn;
+        reader.continuousScale = nextContentScale;
+      });
+    } else if ((reader.continuousScale - nextContentScale).abs() >
+        _kScaleSyncEpsilon) {
+      reader.continuousScale = nextContentScale;
+    }
+  }
 
   @override
   void initState() {
+    super.initState();
     reader = context.reader;
-    _contentScale = reader.continuousScale;
+    _contentScale =
+        reader.continuousScale.clamp(_minScale, _kScaleBaseline).toDouble();
+    _currentScale = _contentScale;
     reader._imageViewController = this;
+    _photoViewSubscription = photoViewController.outputStateStream.listen(
+      _syncScaleState,
+    );
     itemPositionsListener.itemPositions.addListener(onPositionChanged);
     cached = List.filled(reader.maxPage + 2, false);
     Future.delayed(
       const Duration(milliseconds: 100),
       () => cacheImages(reader.page),
     );
-    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _contentScale >= _kScaleBaseline - _kScaleSyncEpsilon) {
+        return;
+      }
+      photoViewController.updateMultiple(scale: _contentScale, position: Offset.zero);
+    });
   }
 
   @override
   void dispose() {
     itemPositionsListener.itemPositions.removeListener(onPositionChanged);
+    _scrollController?.removeListener(onScroll);
+    _photoViewSubscription?.cancel();
+    photoViewController.dispose();
     super.dispose();
   }
 
@@ -815,44 +888,15 @@ class _ContinuousModeState extends State<_ContinuousMode>
       });
       context.readerScaffold.setFloatingButton(0);
     }
-    final currentScale = scale ?? photoViewController.scale ?? 1.0;
-    final configuredMinScale =
-        (appdata.settings.getReaderSetting(
-                  reader.cid,
-                  reader.type.sourceKey,
-                  "continuousMinScale",
-                )
-                as num?)
-            ?.toDouble() ??
-        0.7;
-    final minScale = App.isAndroid
-        ? configuredMinScale.clamp(0.5, 1.0).toDouble()
-        : 1.0;
-    final maxScale = 2.5;
-    final clampedScale = currentScale.clamp(minScale, maxScale).toDouble();
-    if (clampedScale <= 1.01 &&
-        photoViewController.position.distanceSquared > 0.5) {
-      photoViewController.updateMultiple(position: Offset.zero);
-    }
-    final nextContentScale = clampedScale < 1.0 ? clampedScale : 1.0;
-    bool needSetState = false;
-    double? nextScaleToApply;
-    if ((nextContentScale - _contentScale).abs() > 0.01) {
-      nextScaleToApply = nextContentScale;
-      needSetState = true;
-    }
-    var nextIsZoomedIn = clampedScale > 1.01;
-    if (nextIsZoomedIn != this.isZoomedIn) {
-      needSetState = true;
-    }
-    if (needSetState) {
-      setState(() {
-        if (nextScaleToApply != null) {
-          _contentScale = nextScaleToApply;
-          reader.continuousScale = nextScaleToApply;
-        }
-        this.isZoomedIn = nextIsZoomedIn;
-      });
+    if (scale != null) {
+      _syncScaleState(
+        PhotoViewControllerValue(
+          position: photoViewController.position,
+          scale: scale,
+          rotation: photoViewController.rotation,
+          rotationFocusPoint: photoViewController.rotationFocusPoint,
+        ),
+      );
     }
     return false;
   }
@@ -937,7 +981,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
         }
       },
       onPointerUp: (event) {
-        fingers--;
+        fingers = math.max(0, fingers - 1);
         if (fingers <= 1 && disableScroll) {
           setState(() {
             disableScroll = false;
@@ -954,7 +998,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
         }
       },
       onPointerCancel: (event) {
-        fingers--;
+        fingers = math.max(0, fingers - 1);
         if (fingers <= 1 && disableScroll) {
           setState(() {
             disableScroll = false;
@@ -963,13 +1007,15 @@ class _ContinuousModeState extends State<_ContinuousMode>
       },
       onPointerPanZoomUpdate: (event) {
         if (event.scale == 1.0) {
-          smoothTo(0 - event.panDelta.dy);
+          final panDelta = reader.mode == ReaderMode.continuousTopToBottom
+              ? -event.panDelta.dy
+              : -event.panDelta.dx;
+          smoothTo(panDelta);
         }
       },
       onPointerMove: (event) {
         Offset value = event.delta;
-        final currentScale = photoViewController.scale ?? 1.0;
-        if (currentScale <= 1.01 || fingers != 1) {
+        if (_currentScale <= _kScaleBaseline + _kScaleEpsilon || fingers != 1) {
           return;
         }
         Offset offset;
@@ -1003,9 +1049,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
           delayedSetIsScrolling(false);
         }
 
-        var scale = photoViewController.scale ?? 1.0;
-
-        if (notification is ScrollUpdateNotification && scale <= 1.05) {
+        if (notification is ScrollUpdateNotification &&
+            _currentScale <= _kChangeChapterMaxScale) {
           if (!scrollController.hasClients) return false;
           if (scrollController.position.pixels <=
                   scrollController.position.minScrollExtent &&
@@ -1054,20 +1099,13 @@ class _ContinuousModeState extends State<_ContinuousMode>
       width = height * 0.7;
     }
 
-    final configuredMinScale =
-        (appdata.settings.getReaderSetting(
-                  reader.cid,
-                  reader.type.sourceKey,
-                  "continuousMinScale",
-                )
-                as num?)
-            ?.toDouble() ??
-        0.7;
-    final minScale = App.isAndroid
-        ? configuredMinScale.clamp(0.5, 1.0).toDouble()
-        : 1.0;
-    final effectiveScale = _contentScale;
-    if (effectiveScale < 1.0) {
+    final minScale = _minScale;
+    final effectiveScale =
+        _contentScale.clamp(minScale, _kScaleBaseline).toDouble();
+    if ((reader.continuousScale - effectiveScale).abs() > _kScaleSyncEpsilon) {
+      reader.continuousScale = effectiveScale;
+    }
+    if (effectiveScale < _kScaleBaseline) {
       if (reader.mode == ReaderMode.continuousTopToBottom) {
         height = height / effectiveScale;
       } else {
@@ -1079,7 +1117,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
       backgroundDecoration: BoxDecoration(color: context.colorScheme.surface),
       childSize: Size(width, height),
       minScale: minScale,
-      maxScale: 2.5,
+      maxScale: _maxScale,
       strictScale: true,
       controller: photoViewController,
       basePosition: Alignment.topCenter,
