@@ -830,6 +830,10 @@ class _ContinuousModeState extends State<_ContinuousMode>
         : 1.0;
     final maxScale = 2.5;
     final clampedScale = currentScale.clamp(minScale, maxScale).toDouble();
+    if (clampedScale <= 1.01 &&
+        photoViewController.position.distanceSquared > 0.5) {
+      photoViewController.updateMultiple(position: Offset.zero);
+    }
     final nextContentScale = clampedScale < 1.0 ? clampedScale : 1.0;
     bool needSetState = false;
     double? nextScaleToApply;
@@ -837,7 +841,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
       nextScaleToApply = nextContentScale;
       needSetState = true;
     }
-    var nextIsZoomedIn = clampedScale > 1.0;
+    var nextIsZoomedIn = clampedScale > 1.01;
     if (nextIsZoomedIn != this.isZoomedIn) {
       needSetState = true;
     }
@@ -965,7 +969,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
       onPointerMove: (event) {
         Offset value = event.delta;
         final currentScale = photoViewController.scale ?? 1.0;
-        if ((currentScale - 1.0).abs() < 0.01 || fingers != 1) {
+        if (currentScale <= 1.01 || fingers != 1) {
           return;
         }
         Offset offset;
@@ -1071,17 +1075,22 @@ class _ContinuousModeState extends State<_ContinuousMode>
       }
     }
 
-    return PhotoView.customChild(
+    final photoView = PhotoView.customChild(
       backgroundDecoration: BoxDecoration(color: context.colorScheme.surface),
       childSize: Size(width, height),
       minScale: minScale,
       maxScale: 2.5,
-      strictScale: false,
+      strictScale: true,
       controller: photoViewController,
       basePosition: Alignment.topCenter,
       onScaleUpdate: onScaleUpdate,
       child: SizedBox(width: width, height: height, child: widget),
     );
+
+    final gestureAxis = reader.mode == ReaderMode.continuousTopToBottom
+        ? Axis.vertical
+        : Axis.horizontal;
+    return PhotoViewGestureDetectorScope(axis: gestureAxis, child: photoView);
   }
 
   Widget buildBackground(BuildContext context) {
