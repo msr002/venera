@@ -1040,8 +1040,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
     final minScale = App.isAndroid ? 0.7 : 1.0;
     final effectiveScale = _contentScale;
     if (effectiveScale < 1.0) {
-      width = width / effectiveScale;
-      height = height / effectiveScale;
+      if (reader.mode == ReaderMode.continuousTopToBottom) {
+        height = height / effectiveScale;
+      } else {
+        width = width / effectiveScale;
+      }
     }
 
     return PhotoView.customChild(
