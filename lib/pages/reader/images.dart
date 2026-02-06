@@ -696,6 +696,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
   @override
   void initState() {
     reader = context.reader;
+    _contentScale = reader.continuousScale;
     reader._imageViewController = this;
     itemPositionsListener.itemPositions.addListener(onPositionChanged);
     cached = List.filled(reader.maxPage + 2, false);
@@ -844,6 +845,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
       setState(() {
         if (nextScaleToApply != null) {
           _contentScale = nextScaleToApply;
+          reader.continuousScale = nextScaleToApply;
         }
         this.isZoomedIn = nextIsZoomedIn;
       });
@@ -963,7 +965,7 @@ class _ContinuousModeState extends State<_ContinuousMode>
       onPointerMove: (event) {
         Offset value = event.delta;
         final currentScale = photoViewController.scale ?? 1.0;
-        if (currentScale <= 1.0 || fingers != 1) {
+        if ((currentScale - 1.0).abs() < 0.01 || fingers != 1) {
           return;
         }
         Offset offset;
@@ -1074,8 +1076,9 @@ class _ContinuousModeState extends State<_ContinuousMode>
       childSize: Size(width, height),
       minScale: minScale,
       maxScale: 2.5,
-      strictScale: true,
+      strictScale: false,
       controller: photoViewController,
+      basePosition: Alignment.topCenter,
       onScaleUpdate: onScaleUpdate,
       child: SizedBox(width: width, height: height, child: widget),
     );

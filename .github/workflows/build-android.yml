@@ -1,5 +1,5 @@
-name: Build Android (Flavors)
-run-name: Build Android (official/fork)
+name: Build Android (Fork)
+run-name: Build Android (fork)
 on:
   workflow_dispatch: {}
 
@@ -28,15 +28,14 @@ jobs:
       - name: Check rust-toolchain.toml
         run: rustup show
       - run: flutter pub get
-      - name: Build Android APKs (official/fork)
+      - name: Build Android APK (fork)
         run: |
-          flutter build apk --flavor official --release
           flutter build apk --flavor fork --release
       - name: Collect APKs
         run: |
           mkdir -p result/apk
-          find build/app/outputs -name "*.apk" -exec cp {} result/apk/ \;
+          find build/app/outputs -name "*fork*.apk" -exec cp {} result/apk/ \;
       - uses: actions/upload-artifact@v4
         with:
-          name: apks
+          name: apks-fork
           path: result/apk/*.apk

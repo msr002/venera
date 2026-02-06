@@ -171,6 +171,7 @@ class _ReaderState extends State<Reader>
 
   @override
   List<String>? images;
+  double continuousScale = 1.0;
 
   @override
   late ReaderMode mode;
