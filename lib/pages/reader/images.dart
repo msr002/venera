@@ -671,6 +671,10 @@ class _ContinuousModeState extends State<_ContinuousMode>
   static var _isMouseScrolling = false;
   var fingers = 0;
   bool disableScroll = false;
+  final _activePointerLocations = <int, Offset>{};
+  bool _manualPinching = false;
+  double _pinchStartDistance = 0.0;
+  double _pinchStartContentScale = 1.0;
 
   late List<bool> cached;
 
@@ -719,16 +723,74 @@ class _ContinuousModeState extends State<_ContinuousMode>
 
   double get _maxScale => 2.5;
 
+  void _beginManualPinchIfNeeded() {
+    if (_activePointerLocations.length != 2 || _currentScale > _kScaleBaseline + _kScaleEpsilon) {
+      _manualPinching = false;
+      return;
+    }
+    final points = _activePointerLocations.values.toList(growable: false);
+    _pinchStartDistance = (points[0] - points[1]).distance;
+    if (_pinchStartDistance < 1.0) {
+      _manualPinching = false;
+      return;
+    }
+    _pinchStartContentScale = _contentScale;
+    _manualPinching = true;
+  }
+
+  void _updateManualPinchScale() {
+    if (!_manualPinching || _activePointerLocations.length != 2) {
+      return;
+    }
+    final points = _activePointerLocations.values.toList(growable: false);
+    final distance = (points[0] - points[1]).distance;
+    if (distance < 1.0 || _pinchStartDistance < 1.0) {
+      return;
+    }
+    final ratio = distance / _pinchStartDistance;
+    final targetScale = (_pinchStartContentScale * ratio).clamp(_minScale, _kScaleBaseline).toDouble();
+    if ((targetScale - _contentScale).abs() <= _kScaleSyncEpsilon) {
+      return;
+    }
+    if (!mounted) {
+      _contentScale = targetScale;
+      reader.continuousScale = targetScale;
+      return;
+    }
+    setState(() {
+      _contentScale = targetScale;
+      reader.continuousScale = targetScale;
+    });
+  }
+
+  void _endManualPinch() {
+    _manualPinching = false;
+    _pinchStartDistance = 0.0;
+  }
+
+  void _restoreVirtualShrink() {
+    if (_contentScale >= _kScaleBaseline - _kScaleEpsilon) {
+      return;
+    }
+    if (!mounted) {
+      _contentScale = _kScaleBaseline;
+      reader.continuousScale = _kScaleBaseline;
+      return;
+    }
+    setState(() {
+      _contentScale = _kScaleBaseline;
+      reader.continuousScale = _kScaleBaseline;
+    });
+  }
+
   void _syncScaleState(PhotoViewControllerValue value) {
     final nextScale =
-        (value.scale ?? _kScaleBaseline).clamp(_minScale, _maxScale).toDouble();
+        (value.scale ?? _kScaleBaseline).clamp(_kScaleBaseline, _maxScale).toDouble();
     _currentScale = nextScale;
-    final nextContentScale = nextScale < _kScaleBaseline
-        ? nextScale
-        : _kScaleBaseline;
     final nextIsZoomedIn = nextScale > _kScaleBaseline + _kScaleEpsilon;
 
-    if (nextScale <= _kScaleBaseline + _kScaleEpsilon &&
+    if (!_manualPinching &&
+        nextScale <= _kScaleBaseline + _kScaleEpsilon &&
         value.position.distanceSquared > 0.5) {
       photoViewController.updateMultiple(position: Offset.zero);
     }
@@ -737,18 +799,10 @@ class _ContinuousModeState extends State<_ContinuousMode>
       return;
     }
 
-    final needSetState =
-        (nextContentScale - _contentScale).abs() > _kScaleSyncEpsilon ||
-        nextIsZoomedIn != isZoomedIn;
-    if (needSetState) {
+    if (nextIsZoomedIn != isZoomedIn) {
       setState(() {
-        _contentScale = nextContentScale;
         isZoomedIn = nextIsZoomedIn;
-        reader.continuousScale = nextContentScale;
       });
-    } else if ((reader.continuousScale - nextContentScale).abs() >
-        _kScaleSyncEpsilon) {
-      reader.continuousScale = nextContentScale;
     }
   }
 
@@ -758,7 +812,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
     reader = context.reader;
     _contentScale =
         reader.continuousScale.clamp(_minScale, _kScaleBaseline).toDouble();
-    _currentScale = _contentScale;
+    reader.continuousScale = _contentScale;
+    _currentScale = _kScaleBaseline;
     reader._imageViewController = this;
     _photoViewSubscription = photoViewController.outputStateStream.listen(
       _syncScaleState,
@@ -769,12 +824,6 @@ class _ContinuousModeState extends State<_ContinuousMode>
       const Duration(milliseconds: 100),
       () => cacheImages(reader.page),
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _contentScale >= _kScaleBaseline - _kScaleSyncEpsilon) {
-        return;
-      }
-      photoViewController.updateMultiple(scale: _contentScale, position: Offset.zero);
-    });
   }
 
   @override
@@ -782,6 +831,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
     itemPositionsListener.itemPositions.removeListener(onPositionChanged);
     _scrollController?.removeListener(onScroll);
     _photoViewSubscription?.cancel();
+    _activePointerLocations.clear();
+    _endManualPinch();
     photoViewController.dispose();
     super.dispose();
   }
@@ -968,6 +1019,12 @@ class _ContinuousModeState extends State<_ContinuousMode>
     widget = Listener(
       onPointerDown: (event) {
         fingers++;
+        _activePointerLocations[event.pointer] = event.position;
+        if (_activePointerLocations.length == 2) {
+          _beginManualPinchIfNeeded();
+        } else if (_activePointerLocations.length > 2) {
+          _endManualPinch();
+        }
         if (fingers > 1 && !disableScroll) {
           setState(() {
             disableScroll = true;
@@ -981,6 +1038,12 @@ class _ContinuousModeState extends State<_ContinuousMode>
         }
       },
       onPointerUp: (event) {
+        _activePointerLocations.remove(event.pointer);
+        if (_activePointerLocations.length < 2) {
+          _endManualPinch();
+        } else if (_activePointerLocations.length == 2) {
+          _beginManualPinchIfNeeded();
+        }
         fingers = math.max(0, fingers - 1);
         if (fingers <= 1 && disableScroll) {
           setState(() {
@@ -998,6 +1061,12 @@ class _ContinuousModeState extends State<_ContinuousMode>
         }
       },
       onPointerCancel: (event) {
+        _activePointerLocations.remove(event.pointer);
+        if (_activePointerLocations.length < 2) {
+          _endManualPinch();
+        } else if (_activePointerLocations.length == 2) {
+          _beginManualPinchIfNeeded();
+        }
         fingers = math.max(0, fingers - 1);
         if (fingers <= 1 && disableScroll) {
           setState(() {
@@ -1014,6 +1083,18 @@ class _ContinuousModeState extends State<_ContinuousMode>
         }
       },
       onPointerMove: (event) {
+        if (_activePointerLocations.containsKey(event.pointer)) {
+          _activePointerLocations[event.pointer] = event.position;
+        }
+        if (!_manualPinching &&
+            _activePointerLocations.length == 2 &&
+            _currentScale <= _kScaleBaseline + _kScaleEpsilon) {
+          _beginManualPinchIfNeeded();
+        }
+        if (_manualPinching) {
+          _updateManualPinchScale();
+          return;
+        }
         Offset value = event.delta;
         if (_currentScale <= _kScaleBaseline + _kScaleEpsilon || fingers != 1) {
           return;
@@ -1099,13 +1180,14 @@ class _ContinuousModeState extends State<_ContinuousMode>
       width = height * 0.7;
     }
 
-    final minScale = _minScale;
     final effectiveScale =
-        _contentScale.clamp(minScale, _kScaleBaseline).toDouble();
+        _contentScale.clamp(_minScale, _kScaleBaseline).toDouble();
     if ((reader.continuousScale - effectiveScale).abs() > _kScaleSyncEpsilon) {
       reader.continuousScale = effectiveScale;
     }
-    if (effectiveScale < _kScaleBaseline) {
+
+    final isVirtualShrink = effectiveScale < _kScaleBaseline - _kScaleEpsilon;
+    if (isVirtualShrink) {
       if (reader.mode == ReaderMode.continuousTopToBottom) {
         height = height / effectiveScale;
       } else {
@@ -1113,16 +1195,30 @@ class _ContinuousModeState extends State<_ContinuousMode>
       }
     }
 
+    final contentSize = Size(width, height);
+    Widget photoChild = SizedBox(width: width, height: height, child: widget);
+    if (isVirtualShrink) {
+      final alignment = reader.mode == ReaderMode.continuousTopToBottom
+          ? Alignment.topCenter
+          : Alignment.centerLeft;
+      photoChild = Transform.scale(
+        scale: effectiveScale,
+        alignment: alignment,
+        child: photoChild,
+      );
+    }
+
+    final allowPhotoZoom = !isVirtualShrink;
     final photoView = PhotoView.customChild(
       backgroundDecoration: BoxDecoration(color: context.colorScheme.surface),
-      childSize: Size(width, height),
-      minScale: minScale,
-      maxScale: _maxScale,
+      childSize: contentSize,
+      minScale: _kScaleBaseline,
+      maxScale: allowPhotoZoom ? _maxScale : _kScaleBaseline,
       strictScale: true,
       controller: photoViewController,
       basePosition: Alignment.topCenter,
       onScaleUpdate: onScaleUpdate,
-      child: SizedBox(width: width, height: height, child: widget),
+      child: photoChild,
     );
 
     // Use the axis perpendicular to the continuous scroll direction so
@@ -1168,6 +1264,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
       context.readerScaffold.addImageFavorite();
       return;
     }
+    if (_contentScale < _kScaleBaseline - _kScaleEpsilon) {
+      _restoreVirtualShrink();
+      photoViewController.updateMultiple(scale: _kScaleBaseline, position: Offset.zero);
+      return;
+    }
     double target;
     if (photoViewController.scale !=
         photoViewController.getInitialScale?.call()) {
@@ -1186,6 +1287,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
   @override
   void handleLongPressDown(Offset location) {
     if (!appdata.settings['enableLongPressToZoom'] || delayedIsScrolling) {
+      return;
+    }
+    if (_contentScale < _kScaleBaseline - _kScaleEpsilon) {
+      _restoreVirtualShrink();
+      photoViewController.updateMultiple(scale: _kScaleBaseline, position: Offset.zero);
       return;
     }
     double target = photoViewController.getInitialScale!.call()! * 1.75;
