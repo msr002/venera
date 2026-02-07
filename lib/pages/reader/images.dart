@@ -1125,9 +1125,11 @@ class _ContinuousModeState extends State<_ContinuousMode>
       child: SizedBox(width: width, height: height, child: widget),
     );
 
+    // Use the axis perpendicular to the continuous scroll direction so
+    // one-finger chapter scrolling always wins in the gesture arena.
     final gestureAxis = reader.mode == ReaderMode.continuousTopToBottom
-        ? Axis.vertical
-        : Axis.horizontal;
+        ? Axis.horizontal
+        : Axis.vertical;
     return PhotoViewGestureDetectorScope(axis: gestureAxis, child: photoView);
   }
 
